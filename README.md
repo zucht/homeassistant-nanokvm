@@ -69,6 +69,7 @@ project was created by the use of a LLM (Google Gemini) using Cline, as an exper
 
 ### Switches
 
+- **Power**: Toggle PC on/off
 - **SSH**: Toggle SSH on/off
 - **mDNS**: Toggle mDNS on/off
 - **Virtual Network**: Toggle virtual network device on/off
