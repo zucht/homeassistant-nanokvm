@@ -1,0 +1,13 @@
+{
+  "domain": "nanokvm",
+  "name": "Sipeed NanoKVM",
+  "codeowners": ["@Wouter0100"],
+  "config_flow": true,
+  "dependencies": ["zeroconf"],
+  "documentation": "https://github.com/Wouter0100/homeassistant-nanokvm",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Wouter0100/homeassistant-nanokvm/issues",
+  "requirements": ["nanokvm@git+https://github.com/Wouter0100/python-nanokvm.git@patch-1"],
+  "version": "0.1.0",
+  "zeroconf": ["_workstation._tcp.local."]
+}

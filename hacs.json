@@ -1,0 +1,7 @@
+{
+  "name": "Sipeed NanoKVM",
+  "content_in_root": false,
+  "render_readme": true,
+  "domains": ["binary_sensor", "button", "sensor", "switch"],
+  "homeassistant": "2023.8.0"
+}
