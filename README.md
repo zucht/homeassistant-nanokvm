@@ -2,7 +2,8 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
-This integration allows you to control and monitor your [Sipeed NanoKVM](https://github.com/sipeed/NanoKVM) device from Home Assistant.
+This integration allows you to control and monitor your [Sipeed NanoKVM](https://github.com/sipeed/NanoKVM) device from Home Assistant. This
+project was created by the use of a LLM (Google Gemini) using Cline, as an experiment.
 
 ## Features
 

@@ -19,7 +19,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
-    ICON_CDROM,
     ICON_HID,
     ICON_IMAGE,
     ICON_KVM,
