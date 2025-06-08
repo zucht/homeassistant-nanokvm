@@ -24,23 +24,25 @@ from .const import DEFAULT_USERNAME, DEFAULT_PASSWORD, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+CONF_IGNORE_SSL = "ignore_cert_warnings"
+
 async def _async_get_nanokvm_device_info(
-    hass: HomeAssistant, host: str
+    hass: HomeAssistant, host: str, ignore_ssl: bool = False
 ) -> tuple[GetInfoRsp, str] | None:
     """Attempt to connect to the device and retrieve its info without authentication."""
     url = f"http://{host}/api/"
 
-    session = async_get_clientsession(hass)
+    session = _async_get_clientsession_with_ssl(hass, ignore_ssl)
     client = NanoKVMClient(url, session)
 
     try:
         # Attempt to authenticate with default credentials (admin/admin)
         await client.authenticate(DEFAULT_USERNAME, DEFAULT_PASSWORD)
         device_info = await client.get_info()
-        
+
         # Use device_key as the unique identifier
         unique_id = device_info.device_key
-        
+
         # Store in cache using URL and device_key for better lookup
         _LOGGER.debug(
             "Adding device %s to discovery cache with URL %s and device_key %s",
@@ -54,22 +56,23 @@ async def _async_get_nanokvm_device_info(
             "Discovered NanoKVM device at %s requires user credentials.",
             url,
         )
-        # If authentication fails, it's still a NanoKVM device, but we can't get device_info.
-        # We'll let the flow continue to prompt for credentials.
-        # To avoid repeated attempts for the same device, we can cache a "placeholder"
-        # or simply return None and rely on the existing unique_id logic in async_step_zeroconf.
-        # For now, returning None will cause async_step_zeroconf to use discovery_info.properties.get("id", name)
-        # as the unique_id, which is acceptable.
         return None
     except (aiohttp.ClientError, NanoKVMError) as err:
         _LOGGER.debug("Failed to connect to %s during discovery: %s", url, err)
         return None
+
+def _async_get_clientsession_with_ssl(hass, ignore_ssl):
+    if ignore_ssl:
+        connector = aiohttp.TCPConnector(ssl=False)
+        return aiohttp.ClientSession(connector=connector)
+    return async_get_clientsession(hass)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_USERNAME, default=DEFAULT_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_IGNORE_SSL, default=False): bool,
     }
 )
 
@@ -79,13 +82,13 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
-    session = async_get_clientsession(hass)
-    
+    ignore_ssl = data.get(CONF_IGNORE_SSL, False)
+    session = _async_get_clientsession_with_ssl(hass, ignore_ssl)
+
     host = data[CONF_HOST]
     # Ensure the host has a scheme
     if not host.startswith(("http://", "https://")):
         host = f"http://{host}"
-    
     # Ensure the host ends with /api/
     if not host.endswith("/api/"):
         host = f"{host}/api/" if host.endswith("/") else f"{host}/api/"
@@ -95,7 +98,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     try:
         await client.authenticate(data[CONF_USERNAME], data[CONF_PASSWORD])
         device_info = await client.get_info()
-        
+
         # For manual configuration, we use the device_key as the unique identifier
     except NanoKVMAuthenticationFailure as err:
         raise InvalidAuth from err
@@ -104,7 +107,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     # Return info that you want to store in the config entry.
     return {
-        "title": f"NanoKVM ({device_info.mdns})", 
+        "title": f"NanoKVM ({device_info.mdns})",
         "device_key": device_info.device_key,
         "unique_id": device_info.device_key
     }
@@ -121,14 +124,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered_name: str | None = None
         self._discovered_device_key: str | None = None
         self._discovered_unique_id: str | None = None
-        self._default_auth_successful: bool = False # New flag
-        
+        self._default_auth_successful: bool = False
+
     @callback
     def _abort_if_unique_id_configured(self) -> None:
         """Abort if the unique ID is already configured."""
         if self.unique_id is None:
             return
-        
+
         for entry in self._async_current_entries():
             if entry.unique_id == self.unique_id:
                 _LOGGER.debug(
@@ -143,21 +146,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
-        
+
         # Define the schema for the form, with defaults from user_input if available
         schema = vol.Schema(
             {
                 vol.Required(CONF_HOST, default=user_input.get(CONF_HOST) if user_input else None): str,
                 vol.Required(CONF_USERNAME, default=user_input.get(CONF_USERNAME, DEFAULT_USERNAME) if user_input else DEFAULT_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_IGNORE_SSL, default=user_input.get(CONF_IGNORE_SSL, False) if user_input else False): bool,
             }
         )
-        
+
         if user_input is not None:
             # Ensure CONF_PASSWORD is always present, even if empty, to match schema for validation
             if CONF_PASSWORD not in user_input:
                 user_input[CONF_PASSWORD] = ""
-            
             try:
                 info = await validate_input(self.hass, user_input)
             except CannotConnect:
@@ -177,7 +180,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         zeroconf_unique_id
                     )
                     await self.async_set_unique_id(zeroconf_unique_id)
-                    
+
                     # Add the unique_id to the data
                     user_input["unique_id"] = zeroconf_unique_id
                 else:
@@ -187,7 +190,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         info["device_key"]
                     )
                     await self.async_set_unique_id(info["device_key"])
-                    
+
                     # Add the unique_id to the data
                     user_input["unique_id"] = info["device_key"]
                 self._abort_if_unique_id_configured()
@@ -203,34 +206,34 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle zeroconf discovery."""
         host = discovery_info.host
         name = discovery_info.name.split(".")[0]
-        
+
         # Get the zeroconf unique ID from properties or use the name
         zeroconf_unique_id = discovery_info.properties.get("id", name)
-        
+
         # Attempt to get device info with default credentials
         result = await _async_get_nanokvm_device_info(self.hass, host)
 
         # Store discovered info
         self._discovered_host = discovery_info.hostname
-        
+
         if result:
             device_info, device_key = result
             # If we successfully got device_info, use its mDNS name and device_key
             self._discovered_name = device_info.mdns
             self._discovered_device_key = device_key
             self._discovered_unique_id = zeroconf_unique_id
-            self._default_auth_successful = True # Default auth succeeded
-            
+            self._default_auth_successful = True
+
             # Use zeroconf_unique_id as the unique_id for consistency
             _LOGGER.debug(
                 "Using zeroconf_unique_id %s as unique_id for device %s",
                 zeroconf_unique_id,
                 self._discovered_name
             )
-            
+
             # Check if a device with this unique_id is already configured
             await self.async_set_unique_id(zeroconf_unique_id)
-            
+
             # Check if this device is already configured
             for entry in self._async_current_entries():
                 if entry.unique_id == zeroconf_unique_id:
@@ -240,7 +243,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         entry.title
                     )
                     return self.async_abort(reason="already_configured")
-                
+
                 # Also check if the unique_id is stored in the entry data
                 if entry.data.get("unique_id") == zeroconf_unique_id:
                     _LOGGER.debug(
@@ -260,17 +263,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             entry, unique_id=zeroconf_unique_id
                         )
                     return self.async_abort(reason="already_configured")
-            
+
             # If we get here, the device is not configured yet
             self._abort_if_unique_id_configured()
         else:
             # If default credentials failed or other connection error,
             # use the name from zeroconf and fallback to zeroconf_unique_id for display/fallback unique_id
             self._discovered_name = name
-            self._discovered_device_key = zeroconf_unique_id # Fallback unique_id for the entry
+            self._discovered_device_key = zeroconf_unique_id  # Fallback unique_id for the entry
             self._discovered_unique_id = zeroconf_unique_id
-            self._default_auth_successful = False # Default auth failed
-            
+            self._default_auth_successful = False
+
             # Use zeroconf_unique_id as the unique_id
             _LOGGER.debug(
                 "Using zeroconf_unique_id %s as unique_id for device %s",
@@ -279,7 +282,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             await self.async_set_unique_id(zeroconf_unique_id)
             self._abort_if_unique_id_configured()
-            
+
             _LOGGER.debug(
                 "Could not get device info for %s, using zeroconf name '%s' for discovery",
                 host,
@@ -303,7 +306,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_HOST: self._discovered_host,
                     CONF_USERNAME: DEFAULT_USERNAME,
                     CONF_PASSWORD: DEFAULT_PASSWORD,
-                    "unique_id": self._discovered_unique_id, # Store the unique_id in the entry data
+                    "unique_id": self._discovered_unique_id,
                 }
                 try:
                     info = await validate_input(self.hass, data)
@@ -316,10 +319,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 except Exception:
                     _LOGGER.exception("Unexpected exception during direct entry creation")
                     return self.async_abort(reason="unknown")
-                
+
                 # The unique_id is already set in async_step_zeroconf
                 return self.async_create_entry(
-                    title=info["title"], 
+                    title=info["title"],
                     data=data
                 )
             else:
