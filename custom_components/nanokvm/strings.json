@@ -7,7 +7,8 @@
         "data": {
           "host": "Host (IP address or hostname)",
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "ignore_cert_warnings": "Ignore certificate warnings (allow self-signed certificates)"
         }
       },
       "zeroconf_confirm": {
